@@ -1,0 +1,66 @@
+ts =pd.Series(sin,index=pd.date_range('1/1/2000', periods=1000))
+#SerieInt
+type(ts)
+print(ts)
+
+from statsmodels.graphics.tsaplots import plot_acf
+
+a=plot_acf(ts,lags=40,title='ACF')
+
+from pandas import DataFrame
+# reframe as supervised learning
+# lag observation (t-1) is the input variable and t is the output variable.
+df1 = DataFrame()
+print(df1)
+
+df = pd.DataFrame(ts.values,index=ts.index)
+type(df)
+print(df)
+
+for i in range(10,0,-1):
+    df1[['t-'+str(i)]] = df.shift(i)
+    
+print(df1)
+
+df1['t'] = df.values
+print(df1)
+
+df1_ENE = df1[10:]
+print(df1_ENE)
+df1_ENE.size
+
+ENEsplit = df1_ENE.values
+# split into lagged variables and original time series
+X1= ENEsplit[:, 0:-1] # slice all rows and start with column 0 and go up to but not including the last column
+y1 =ENEsplit[:,-1] # slice all rows and last column, essentially separating out 't' column
+
+print(X1)
+print(y1)
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+
+X_train, X_test, y_train, y_test=train_test_split(X1,y1,test_size=0.2, train_size=0.8, shuffle=False)
+
+import tensorflow.keras as keras
+
+model=keras.models.Sequential([keras.layers.Dense(8,activation="relu",input_shape=X_train.shape[1:]),keras.layers.Dense(1)])
+#primera capa oculta con 32 unidades, fun. relu y dimensión de entrada    
+#capa de salida con una de salida
+model.summary()
+
+model.compile(loss="mean_squared_error",optimizer="adam")
+history=model.fit(X_train,y_train,epochs=30,validation_split=0.1, verbose=1, shuffle=False)
+
+pd.DataFrame(history.history).plot(figsize=(8,5))
+
+mse_test=model.evaluate(X_test,y_test)
+
+ypred=model.predict(X_test)
+
+plt.plot(y_test[50:200], marker='.', label="true")
+plt.plot(ypred[50:200], 'r', label="prediction")
+plt.ylabel('Value')
+plt.xlabel('Time Step')
+plt.legend()
+plt.show();
