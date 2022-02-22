@@ -1,0 +1,358 @@
+\documentclass{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+\title*{Análisis Descriptivo con la serie ColCap}\\
+\date*{\today}
+
+\section*{Cargar datos}
+Cargamos los datos, en este caso el archivo es excel. Entonces:
+<<>>=
+library(readxl)
+data <- read_excel("~/Material Cursos/Series de Tiempo/Serie de Ejercicios.xlsx", sheet = "Colcap")
+@
+\section*{Pre-procesamiento de la serie}
+Debemos poner los datos en formato de Time Series, para esto usamos el formato xts que es una versión extendida de zoo. Ordenamos por las fechas que traia la base de datos con una corrección de 24.03.2018 por 24/03/2018 en excel.
+La frecuencia es diaria, la clase del indice es Date y es regular. Todo OK
+<<>>=
+library(xts)
+library(tidyverse)
+library(TSstudio)
+ApColcap <- xts(data$Apertura, order.by = as.Date(data$Fecha))
+ts_info(ApColcap)
+str(ApColcap)
+class(ApColcap)
+head(index(ApColcap))
+class(index(ApColcap))
+is.regular(ApColcap, strict = FALSE)
+@
+Si nos fijamos en la base de datos en excel las fechas vienen al revés, las más recientes de primeras. Ahora, al meter el formato xts automaticamente toma las más viejas de primera, pero veamos como es el codigo para tomar la reversa. Usamos el operador '\% >\%'
+<<>>=
+Ap <- data %>% map_df(rev)
+ApColcap1 <- xts(Ap$Apertura, order.by = as.Date(Ap$Fecha))
+head(ApColcap1)
+head(ApColcap)
+@
+
+\section*{Representación gráfica de la serie}
+Veamos algunos gráficos.\\
+Primero el comportamiento de la serie parece tener tendencia, además de una caida importante a comienzos del 2020 que posiblemente fue por la pandemia. No parece haber presencia de heteroscedasticidad.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{Colcap21.PNG}
+    \caption{Precio de apertura ColCap}
+    \label{fig1}
+\end{figure}
+
+Y el grafico de autocorrelación, vemos una fuerte autocorrelación entre las observaciones en el tiempo.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{Colcap21 acf.PNG}
+    \caption{ACF de ColCap}
+    \label{fig2}
+\end{figure}
+
+\section*{Analisis de tendencia}
+Como vimos en el grafico del precio de apertura hay tendencia y no hay estacionaridad. Ahora, podemos eliminar la tendencia calculando $y - \hat{y}$ o podemos eliminar la serie y hacer la serie estacionaria (garantizado) si diferenciamos la serie. 
+\subsection*{Estimar y eliminar}
+Vemos que esto no es efectivo para esta base de datos, note que el $R^2$ es muy bajo 
+<<>>=
+library(astsa)
+#Eliminar la tendencia con y - est(y)
+summary(fit <- lm(ApColcap ~ time(ApColcap), na.action = NULL))
+sinten <- ApColcap - predict(fit)
+@
+Además al graficar la serie sinten es praticamente la misma solamente está centrada en 0 y aún tiene problemas de autocorrelación.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{sinten.PNG}
+    \caption{ColCap sin $\hat{y}$}
+    \label{fig3}
+\end{figure}
+
+\subsection*{Diferenciación}
+Para hacer la serie sin tendencia(parece que ya lo es) y estacionaria vamos a diferenciar, para esto usamos la función diff de R
+<<>>=
+plot(diff(ApColcap), type="l", main="Primera Diferencia") 
+@
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{ColCap diff.PNG}
+    \caption{ColCap diferenciada}
+    \label{fig4}
+\end{figure}
+
+Vemos que la serie es estacionaria comparando los 3 gráficos de autocorrelación, es decir, el de la serie original, eliminando $\hat{y}$ y diferenciando. Para el último la autocorrelación es no significativa, por lo tanto la serie es sin tendencia y estacionaria.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{Colcap 3 acf.PNG}
+    \caption{Colcap acf}
+    \label{fig5}
+\end{figure}
+
+\section*{Varianza Marginal}
+Vamos a analizar la varianza marginal, en caso de no ser constante debemos aplicar una transformación para eliminar este problema. La transformación más usada es la de Box-Cox con el fin de estabilizar la varianza. La transformación es $f_{\lambda}(u_{t})= \lambda^{-1}(u^{\lambda}_{t}-1)$ si $u_{t} \geq 0$, para $\lambda>0$ y $f_{\lambda}(u_{t})= \ln(u_{t})$ si $u_{t}>0$, para $\lambda=0$\\
+
+Usualmente lambda debe estar entre 0 y 1, más allá de 1 toca pensar si vale la pena porque es elevar la variable a una potencia y pues no arregla el problema de estabilizar la varianza. Si da 1 no hay cambio.\\
+El código es
+<<>>=
+library(FitAR)
+library(forecast)
+forecast::BoxCox.lambda(ApColcap, method = "guerrero", lower = 0, upper = 2) #valor
+#FitAR::BoxCox(AirPassengers)###Me entrega una gráfica
+#lAirPass=log(AirPassengers) #transformación logaritmica porque el lambda es muy 
+#FitAR::BoxCox(lAirPass) #verifiquemos si la transformación sirvio para estabilizar la varianza marginal.
+#forecast::BoxCox.lambda(lAirPass, method = "guerrero", lower = -1, upper = 2)
+@
+
+\section*{Graficas de retardos}
+Vamos a hacer gráficos de dispersión para chequear que tipos de relaciones hay entre los retardos de la variable interés. Para este caso, la mayoria de las relaciones entre retardos es lineal y se va deformando entre aumenta la distancia.
+<<>>=
+par(mar = c(3,2,3,2))
+astsa::lag1.plot(ApColcap, 12)
+#ts_lags(ApColcap,lags=1:12) interactivo
+#lag2.plot(soi, rec, 8) entre dos series
+@
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{retardos.PNG}
+    \caption{Colcap retardos relación}
+    \label{fig6}
+\end{figure}
+
+\section*{Autocovarianza}
+Para explorar la significancia de la relación lineal entre retardos graficamos las autocovarianzas. Para esto usamos:
+<<>>=
+#acf(ApColcap,100,main='ColCap')
+#ccf(serie1,serie2, retardos, ...)
+@
+
+\section*{Medidas descriptivas}
+Algunas medidas descriptivas por mes o por año, difiere si es ts (mejor) o xts.
+Para ts es:
+<<>>=
+#USgas_df <- data.frame(year = floor(time(USgas)), month = cycle(USgas),USgas = as.numeric(USgas))
+
+#library(dplyr)
+#USgas_summary <- USgas_df %>%group_by(month) %>%summarise(mean= mean(USgas),sd = sd(USgas))
+#USgas_summary
+
+#library(plotly)
+#plot_ly (data = ColCap_summary, x = ~ month, y = ~ mean, type = "bar", name   = "Mean") %>%
+  #layout (title = "ColCap - Monthly Average", yaxis =list(title = "Mean",   range = c(1000, 1700)))
+@
+
+Para xts es:
+<<>>=
+ApColcap_df <- data.frame(year = as.numeric(format(time(ApColcap),'%Y')), 
+                          month = as.numeric(format(time(ApColcap),'%m')),USgas = as.numeric(ApColcap))
+head(ApColcap_df)
+
+ApColcap_df$month <- factor(month.abb[ApColcap_df$month], levels = month.abb)
+ApColcap_df$year <- factor(ApColcap_df$year, levels = c(2018,2019,2020,2021))
+
+ColCap_summary <- tapply(ApColcap_df$USgas, ApColcap_df$month,mean)
+ColCap_summary
+
+ColCapy_summary <- tapply(ApColcap_df$USgas, ApColcap_df$year,mean)
+ColCapy_summary
+
+#Histogramas por el type h
+plot(c(2018:2021), ColCapy_summary, type = 'h',col='red',lwd=10, 
+     main = 'ColCap- year average', xlab='años', ylab ='mean')
+
+plot(c(1:12), ColCap_summary, type = 'h',col='green',lwd=10, 
+     main = 'ColCap- month average', xlab='meses', ylab = 'mean')
+@
+
+\section*{Graficos de densidades para explorar estacionalidad}
+Otro enfoque para analizar patrones estacionales en datos de series de tiempo es trazar la distribución de las unidades de frecuencia mediante el uso de histogramas o gráficos de densidad. Esto nos permitirá examinar si cada unidad de frecuencia tiene una distribución única que puede distinguirla del resto de unidades. Para esto usaremos el paquete <b>ggplot2</b>.
+
+Como en nuestro caso de estudio todas las densidades se superponen entre si podemos pensar que no hay  un ciclo estacional. Además se pueden hacer 3 gráficos por cada grupo (meses, años, dias, horas), con la serie original, sin tendencia o diferenciada. El codigo es:
+<<>>=
+library(ggplot2)
+
+#MESES
+ggplot(ApColcap_df, aes(x = ApColcap)) +
+  geom_density(aes(fill = month)) +
+  ggtitle("USgas - Kernel Density Estimates by Month") +
+  facet_grid(rows = vars(as.factor(month)))
+#sin tendencia
+#USgas_df$USgas_detrend <- USgas_df$USgas - decompose(USgas)$trend
+#ggplot(USgas_df, aes(x = USgas_detrend)) +
+  #geom_density(aes(fill = month)) +
+  #ggtitle("USgas - Estimación de la densidad vía Kernel por mes") +
+  #facet_grid(rows = vars(as.factor(month)))
+#diferenciada
+ApColcap_df$ColDiff <- c(0 , diff(ApColcap_df$ApColcap))
+ggplot(ApColcap_df, aes(x = ColDiff)) +
+  geom_density(aes(fill = month)) +
+  ggtitle("ColCap - Estimación de la densidad vía Kernel por mes") +
+  facet_grid(rows = vars(as.factor(month)))
+
+#AÑOS
+ggplot(ApColcap_df, aes(x = ColDiff)) +
+  geom_density(aes(fill = year)) +
+  ggtitle("ColCap - Estimación de la densidad vía Kernel por año") +
+  facet_grid(rows = vars(as.factor(year)))
+@
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{Densidad Colcap.PNG}
+    \caption{Colcap Densidad años}
+    \label{fig7}
+\end{figure}
+
+\section*{Paquete Forecast}
+Es una herramienta adicional para el analisis de estacionalidad, solo funciona para objetos ts y si tiene ciclos estacionales. En nuestro ejemplo no sirve, dejo el codigo:
+<<>>=
+#library(forecast)
+#   ggseasonplot(USgas,year.labels=TRUE,continuous=TRUE)
+   
+#ggseasonplot(USgas,  polar = TRUE)
+@
+Algo similar hace el paquete TSstudio y no molesta tanto, aunque para nuestro caso solo va a sacar por año. Además hace los gráficos con los cuantiles.
+<<>>=
+ts_seasonal(USgas,type ="normal")
+
+#ts_seasonal(USgas, type = "cycle")
+
+#ts_seasonal(USgas, type = "box")
+
+#ts_seasonal(USgas, type = "all")
+
+ts_quantile(ApColcap, period = "yearly")
+
+ts_quantile(ApColcap, period = "monthly")
+
+ts_quantile(ApColcap, period = "quarterly")
+
+@
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{forecast colcap.PNG}
+    \caption{Colcap comparacion años}
+    \label{fig8}
+\end{figure}
+
+\section*{Periodograma}
+Si estamos buscando ciclos entonces podemos ajustar un modelo de regresión, para esto necesitamos calcular la componente ciclica. Ahora, para hallar esa componente ciclica se usa el periodograma.\\
+El periodograma es una herramienta que permite detectar el valor de la frecuencia $\omega$ que en general es desconocida. El grafico lo hayamos asi:
+<<>>=
+library(astsa)
+colcap.per = astsa::mvspec(ApColcap, log="no")
+ubicacioncap=which.max(colcap.per$spec)
+sprintf("El valor de la frecuencia donde se máximiza el periodograma para SOI es: %s",colcap.per$freq[ubicacioncap])
+n_col <- length(colcap.per$spec)
+valor_seg_colcap=sort(colcap.per$spec,partial=n_col-1)[n_col-1]
+ubica_segundo_cap=which(colcap.per$spec==valor_seg_colcap)
+
+sprintf("El valor de la frecuencia donde se alcanza el segundo máximo para el periodograma para SOI es: %s",colcap.per$freq[ubica_segundo_cap])
+abline(v=colcap.per$freq[ubicacioncap], lty=2,col="blue")
+abline(v=colcap.per$freq[ubica_segundo_cap], lty=2,col="blue")
+@
+
+Note que la primera frecuencia mas alta se encuentra en $\omega= 0.0025$, el cual corresponde al ciclo 400 dias. La segunda corresponde a $\omega= 0.00125$, el cual corresponde a un posible ciclo de periodo $1/0.00125= 800$ dias.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{periodograma colcap.PNG}
+    \caption{Colcap periodograma}
+    \label{fig9}
+\end{figure}
+
+\section*{Suavizamiento}
+A veces para ver tendencia o ciclos es necesario suavizar la grafica de la serie de tiempo, no se puede predecir solo es analizar lo observado.
+\subsection*{Promedios moviles}
+El promedio móvil es un método es útil para descubrir ciertos rasgos en una serie de tiempo, como tendencias a largo plazo y componentes estacionales. En particular, si $x_t$ representa las observaciones, entonces una forma de predecir predecir o estimar la tendencia de la serie es:
+
+$$m_t=\sum_{j=-k}^{k}a_jx_{t-j},$$
+<<>>=
+wgts = c(.5, rep(1,11), .5)/12   ###Los pesos de los filtros
+colf = stats::filter(ApColcap, sides=2, filter=wgts)
+plot.ts(ApColcap)
+lines(colf, lwd=2, col=4)
+@
+
+Aqui no es tan suave por los cambios bruscos, se pega a los datos.
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{pm colcap.PNG}
+    \caption{Colcap suavizada promedios moviles}
+    \label{fig10}
+\end{figure}
+
+\subsection*{Kernel}
+El suavizamiento kernel es un suavizador de promedio móvil que utiliza una función de ponderación, o kernel, para promediar las observaciones.Veamos ahora como queda el promedio móvil:
+
+$$m_t=\sum_{i=1}^{n}w_i(t)x_i$$
+
+<<>>=
+plot.ts(ApColcap)
+#est <- ksmooth(time(ApColcap), ApColcap_df$ApColcap, "normal", bandwidth=1)
+#any(is.na(est$y))
+#est1 <- na.omit(est$y)
+#lines(est1 , lwd=3, col=4)
+@
+Generó muchos NA entonces tocó quitarlos, generalmente no batallas tanto. Aquí se pegó un poco menos a los datos pero está corrida, sin la pandemia posiblemente seguiria creciendo.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{kernel colcap.PNG}
+    \caption{Colcap suavizada kernel}
+    \label{fig11}
+\end{figure}
+
+\subsection*{Lowess}
+Otro enfoque para suavizar un gráfico de tiempo es la regresión del vecino más cercano. La técnica se basa en la regresión de k vecinos más cercanos, en la que uno usa solo los datos $\{x_{t−k/2}, ..., x_t, ..., x_{t+k/2}\}$ para predecir $x_t$ mediante regresión, y luego establece $m_t = \hat{x}_t$. Entre más vecinos, más suave
+
+<<>>=
+plot.ts(ApColcap)
+lines(lowess(ApColcap, f=.05), lwd=2, col=4)  # Ciclo 
+lines(lowess(ApColcap), lty=2, lwd=2, col=2)  # tendencia (con span por defecto)
+@
+El primero es para ver el grafico suave, aunque lo importante es la tendencia que nos muestra.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{lowess colcap.PNG}
+    \caption{Colcap suavizada kernel}
+    \label{fig11}
+\end{figure}
+
+\subsection*{Splines}
+Una forma obvia de suavizar los datos sería ajustar una regresión polinomial en términos del tiempo. Por ejemplo, un polinomio cúbico tendría $x_t = m_t + w_t$ donde $m_t =\beta_0 + \beta_1t + \beta_2t^2 + \beta_3t^3$. Entonces podríamos ajustar $m_t$ mediante mínimos cuadrados ordinarios.
+
+<<>>=
+#SPLINES
+plot.ts(ApColcap, xlim=c(0,1200))
+
+spli1 <-smooth.spline(time(ApColcap), ApColcap, spar=.5)
+spli1$x <- spli1$x - 17576
+lines(smooth.spline(time(ApColcap), ApColcap, spar=.5), lwd=2, col=4)
+lines(spli1, lwd=2, col=4)
+
+spli2 <- smooth.spline(time(ApColcap), ApColcap, spar= 1)
+spli2$x <- spli2$x - 17576
+lines(smooth.spline(time(ApColcap), ApColcap, spar= 1), lty=2, lwd=2, col=2)
+lines(spli2, lty=2, lwd=2, col=2)
+@
+Aquí la tendencia es mas suave y vemos cómo varia a lo largo del tiempo.
+
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[trim={0cm 0cm 0cm 0cm},clip,scale=1,width=1\columnwidth]{lowess colcap.PNG}
+    \caption{Colcap suavizada kernel}
+    \label{fig11}
+\end{figure}
+
+\end{document}
